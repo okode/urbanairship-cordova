@@ -1,6 +1,7 @@
 /* Copyright 2018 Urban Airship and Contributors */
 
 #import <Foundation/Foundation.h>
+#import "AirshipLib.h"
 
 /**
  * Manager delegate.
@@ -10,7 +11,7 @@
 /**
  * Called to notify listeners of a new or pending event.
  */
--(void)notifyListener:(NSString *)eventType data:(NSDictionary *)data;
+-(BOOL)notifyListener:(NSString *)eventType data:(NSDictionary *)data;
 @end
 
 /**
@@ -74,5 +75,13 @@
  * @param options The presentation options.
  */
 - (void)setPresentationOptions:(NSUInteger)options;
+
+/**
+ * Generates a push event dictionary from a notification content object.
+ *
+ * @param notificationContent The notification content.
+ * @return A push event dictionary.
+ */
+- (NSDictionary *)pushEventFromNotification:(UANotificationContent *)notificationContent;
 
 @end

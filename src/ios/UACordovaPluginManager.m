@@ -2,6 +2,13 @@
 
 #import "UACordovaPluginManager.h"
 #import "AirshipLib.h"
+#import "UACordovaEvent.h"
+#import "UACordovaDeepLinkEvent.h"
+#import "UACordovaInboxUpdatedEvent.h"
+#import "UACordovaNotificationOpenedEvent.h"
+#import "UACordovaNotificationOptInEvent.h"
+#import "UACordovaPushEvent.h"
+#import "UACordovaRegistrationEvent.h"
 
 // Config keys
 NSString *const ProductionAppKeyConfigKey = @"com.urbanairship.production_app_key";
@@ -26,18 +33,9 @@ NSString *const AuthorizedNotificationSettingsCarPlayKey = @"carPlay";
 NSString *const AuthorizedNotificationSettingsLockScreenKey = @"lockScreen";
 NSString *const AuthorizedNotificationSettingsNotificationCenterKey = @"notificationCenter";
 
-// Events
-NSString *const EventPushReceived = @"urbanairship.push";
-NSString *const EventNotificationOpened = @"urbanairship.notification_opened";
-NSString *const EventNotificationOptInStatus = @"urbanairship.notification_opt_in_status";
-
-NSString *const EventInboxUpdated = @"urbanairship.inbox_updated";
-NSString *const EventRegistration = @"urbanairship.registration";
-NSString *const EventDeepLink = @"urbanairship.deep_link";
-
 @interface UACordovaPluginManager() <UARegistrationDelegate, UAPushNotificationDelegate, UAInboxDelegate, UADeepLinkDelegate>
 @property (nonatomic, strong) NSDictionary *defaultConfig;
-@property (nonatomic, strong) NSMutableDictionary *pendingEvents;
+@property (nonatomic, strong) NSMutableArray<NSObject<UACordovaEvent> *> *pendingEvents;
 @property (nonatomic, assign) BOOL isAirshipReady;
 
 @end
@@ -55,7 +53,7 @@ NSString *const EventDeepLink = @"urbanairship.deep_link";
 
     if (self) {
         self.defaultConfig = defaultConfig;
-        self.pendingEvents = [NSMutableDictionary dictionary];
+        self.pendingEvents = [NSMutableArray array];
     }
 
     return self;
@@ -198,7 +196,7 @@ NSString *const EventDeepLink = @"urbanairship.deep_link";
 
 - (void)inboxUpdated {
     UA_LDEBUG(@"Inbox updated");
-    [self fireEvent:EventInboxUpdated data:@{}];
+    [self fireEvent:[UACordovaInboxUpdatedEvent event]];
 }
 
 #pragma mark UAPushNotificationDelegate
@@ -206,8 +204,9 @@ NSString *const EventDeepLink = @"urbanairship.deep_link";
 -(void)receivedForegroundNotification:(UANotificationContent *)notificationContent completionHandler:(void (^)(void))completionHandler {
     UA_LDEBUG(@"Received a notification while the app was already in the foreground %@", notificationContent);
 
-    id event = [self pushEventFromNotification:notificationContent];
-    [self fireEvent:EventPushReceived data:event];
+    NSDictionary *data = [self pushEventFromNotification:notificationContent];
+
+    [self fireEvent:[UACordovaPushEvent eventWithData:data]];
 
     completionHandler();
 }
@@ -216,30 +215,31 @@ NSString *const EventDeepLink = @"urbanairship.deep_link";
                      completionHandler:(void (^)(UIBackgroundFetchResult))completionHandler {
 
     UA_LDEBUG(@"Received a background notification %@", notificationContent);
-    id event = [self pushEventFromNotification:notificationContent];
+    NSDictionary *data = [self pushEventFromNotification:notificationContent];
 
-    [self fireEvent:EventPushReceived data:event];
+    [self fireEvent:[UACordovaPushEvent eventWithData:data]];
     completionHandler(UIBackgroundFetchResultNoData);
 }
 
 -(void)receivedNotificationResponse:(UANotificationResponse *)notificationResponse completionHandler:(void (^)(void))completionHandler {
     UA_LDEBUG(@"The application was launched or resumed from a notification %@", notificationResponse);
     NSDictionary *pushEvent = [self pushEventFromNotification:notificationResponse.notificationContent];
-    NSMutableDictionary *event = [NSMutableDictionary dictionaryWithDictionary:pushEvent];
+    NSMutableDictionary *data = [NSMutableDictionary dictionaryWithDictionary:pushEvent];
 
     if ([notificationResponse.actionIdentifier isEqualToString:UANotificationDefaultActionIdentifier]) {
-        [event setValue:@(YES) forKey:@"isForeground"];
+        [data setValue:@(YES) forKey:@"isForeground"];
     } else {
         UANotificationAction *notificationAction = [self notificationActionForCategory:notificationResponse.notificationContent.categoryIdentifier
                                                                       actionIdentifier:notificationResponse.actionIdentifier];
 
         BOOL isForeground = notificationAction.options & UNNotificationActionOptionForeground;
-        [event setValue:@(isForeground) forKey:@"isForeground"];
-        [event setValue:notificationResponse.actionIdentifier forKey:@"actionID"];
+        [data setValue:@(isForeground) forKey:@"isForeground"];
+        [data setValue:notificationResponse.actionIdentifier forKey:@"actionID"];
     }
 
-    self.lastReceivedNotificationResponse = event;
-    [self fireEvent:EventNotificationOpened data:event];
+    self.lastReceivedNotificationResponse = data;
+
+    [self fireEvent:[UACordovaNotificationOpenedEvent eventWithData:data]];
     completionHandler();
 }
 
@@ -264,8 +264,7 @@ NSString *const EventDeepLink = @"urbanairship.deep_link";
 #pragma mark UADeepLinkDelegate
 -(void)receivedDeepLink:(NSURL *_Nonnull)url completionHandler:(void (^_Nonnull)(void))completionHandler {
     self.lastReceivedDeepLink = [url absoluteString];
-    NSDictionary *data = @{ @"deepLink":[url absoluteString]};
-    [self fireEvent:EventDeepLink data:data];
+    [self fireEvent:[UACordovaDeepLinkEvent eventWithDeepLink:url]];
 }
 
 #pragma mark UARegistrationDelegate
@@ -280,12 +279,13 @@ NSString *const EventDeepLink = @"urbanairship.deep_link";
         data = @{ @"channelID":channelID };
     }
 
-    [self fireEvent:EventRegistration data:data];
+    [self fireEvent:[UACordovaRegistrationEvent eventWithData:data]];
 }
 
 - (void)registrationFailed {
-    UA_LINFO(@"Channel registration failed.");
-    [self fireEvent:EventRegistration data:@{ @"error": @"Registration failed." }];
+   UA_LINFO(@"Channel registration failed.");
+    UACordovaRegistrationEvent *event = [UACordovaRegistrationEvent eventWithData:@{ @"error": @"Registration failed." }];
+    [self fireEvent:event];
 }
 
 - (void)notificationAuthorizedSettingsDidChange:(UAAuthorizedNotificationSettings)authorizedSettings {
@@ -341,7 +341,8 @@ NSString *const EventDeepLink = @"urbanairship.deep_link";
                                   }};
 
     UA_LINFO(@"Opt in status changed.");
-    [self fireEvent:EventNotificationOptInStatus data:eventBody];
+    UACordovaNotificationOptInEvent *event = [UACordovaNotificationOptInEvent eventWithData:eventBody];
+    [self fireEvent:event];
 }
 
 - (NSDictionary *)pushEventFromNotification:(UANotificationContent *)notificationContent {
@@ -414,22 +415,34 @@ NSString *const EventDeepLink = @"urbanairship.deep_link";
 }
 
 
-- (void)fireEvent:(NSString *)type data:(NSDictionary *)data {
+- (void)fireEvent:(NSObject<UACordovaEvent> *)event {
     id strongDelegate = self.delegate;
-    if (strongDelegate) {
-        [strongDelegate notifyListener:type data:data];
+
+    if (strongDelegate && [strongDelegate notifyListener:event.type data:event.data]) {
+        UA_LTRACE(@"Cordova plugin manager delegate notified with event of type:%@ with data:%@", event.type, event.data);
+
+        return;
     }
+
+    UA_LTRACE(@"No cordova plugin manager delegate available, storing pending event of type:%@ with data:%@", event.type, event.data);
+
+    // Add pending event
+    [self.pendingEvents addObject:event];
 }
 
 - (void)setDelegate:(id<UACordovaPluginManagerDelegate>)delegate {
     _delegate = delegate;
 
     if (delegate) {
-        NSDictionary *events = [self.pendingEvents copy];
-        [self.pendingEvents removeAllObjects];
+        @synchronized(self.pendingEvents) {
+            UA_LTRACE(@"Cordova plugin manager delegate set:%@", delegate);
 
-        for (NSString *eventType in events) {
-            [self fireEvent:eventType data:events[eventType]];
+            NSDictionary *events = [self.pendingEvents copy];
+            [self.pendingEvents removeAllObjects];
+
+            for (NSObject<UACordovaEvent> *event in events) {
+                [self fireEvent:event];
+            }
         }
     }
 }
