@@ -1,8 +1,6 @@
 #!/bin/bash
 
-# Parse framework version line from plugin and pull out the version number
-VERSION=$(xpath plugin.xml '/plugin/platform[@name="ios"]/source-file[@framework="true"]' 2>/dev/null |
-grep -oh '[0-9]\+\.[0-9]\+\.[0-9]\+')
+VERSION=9.4.0
 
 echo "Downloading libUAirship-$VERSION.zip from bintray..."
 curl -s -LO "https://urbanairship.bintray.com/iOS/urbanairship-sdk/$VERSION/libUAirship-$VERSION.zip"
